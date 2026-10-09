@@ -1,0 +1,23 @@
+{
+  "name": "@standard-co/harness",
+  "version": "0.0.0",
+  "description": "RLM and Python execution inside Pi Durable.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.19.0" },
+  "bin": { "standard": "./bin/standard.ts" },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-durable": "1.1.0",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.9"
+  }
+}
