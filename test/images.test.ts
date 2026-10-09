@@ -7,12 +7,13 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ImageContent, Message, TranscriptContext } from "@earendil-works/pi-ai";
+import { createProvider } from "@earendil-works/pi-ai";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openStandard } from "../src/harness.ts";
 import { KernelDoc } from "../src/kernel/extension.ts";
 import { readImageFile } from "../src/models.ts";
-import { casedevProvider } from "../src/providers/casedev.ts";
 
 const python = process.env.STANDARD_PYTHON ?? resolve(import.meta.dirname, "../.venv/bin/python");
 const context = BACKGROUND_CONTEXT;
@@ -125,7 +126,7 @@ test("images: an image in user input reaches the model request", async () => {
 	});
 });
 
-test("images: the case.dev wire request carries the cell's image as an image_url data URL", async () => {
+test("images: an OpenAI-compatible wire request carries the cell's image as an image_url data URL", async () => {
 	const bodies: Record<string, unknown>[] = [];
 	const read = async (req: IncomingMessage) => {
 		let raw = "";
@@ -150,14 +151,21 @@ test("images: the case.dev wire request carries the cell's image as an image_url
 		}
 	});
 	await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-	const previousKey = process.env.CASEDEV_API_KEY;
-	process.env.CASEDEV_API_KEY = "sk_test";
 	try {
+		const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 		const models = createModels();
-		models.setProvider(casedevProvider({ baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }));
-		await models.refresh({ providers: ["casedev"] });
+		models.setProvider(
+			createProvider({
+				id: "compat",
+				name: "OpenAI-compatible test server",
+				baseUrl,
+				auth: { apiKey: { name: "test", resolve: async () => ({ auth: { apiKey: "sk_test" } }) } },
+				models: [{ id: "vision", name: "vision", api: "openai-completions", provider: "compat", baseUrl, reasoning: false, input: ["text", "image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100_000, maxTokens: 4_096 }],
+				api: openAICompletionsApi(),
+			}),
+		);
 		await withStandard(models, async (standard, dir) => {
-			const root = await standard.harness.root(context, { agent: { model: { provider: "casedev", modelId: "vision" }, cwd: dir } });
+			const root = await standard.harness.root(context, { agent: { model: { provider: "compat", modelId: "vision" }, cwd: dir } });
 			const settled = await (await root.submit({ type: "input", content: "Show me the pixel." }, context)).wait(context);
 			assert.equal(settled.status, "done");
 		});
@@ -165,8 +173,6 @@ test("images: the case.dev wire request carries the cell's image as an image_url
 		const wire = JSON.stringify(bodies[1]);
 		assert.match(wire, /"type":"image_url","image_url":\{"url":"data:image\/png;base64,iVBORw0KGgo/);
 	} finally {
-		if (previousKey === undefined) delete process.env.CASEDEV_API_KEY;
-		else process.env.CASEDEV_API_KEY = previousKey;
 		server.close();
 	}
 });

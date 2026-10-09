@@ -57,6 +57,9 @@ RUN apt-get update \
 
 COPY --from=builder /opt/standard/venv /opt/standard/venv
 COPY --from=builder /opt/standard/node_modules /opt/standard/node_modules
+# Provider modules mounted anywhere under / resolve @earendil-works/pi-ai through
+# Node's parent-directory walk ending at /node_modules.
+RUN ln -s /opt/standard/node_modules /node_modules
 COPY package.json package-lock.json LICENSE README.md /opt/standard/
 COPY bin /opt/standard/bin
 COPY src /opt/standard/src

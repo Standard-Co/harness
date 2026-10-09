@@ -27,7 +27,13 @@ edits whose entries changed meanwhile, writes the file, and records the result.
 Automatic refinement goes through a review gate every few turns; the model can
 also ask for one from the REPL.
 
-What Standard does not ship: a TUI, a chat CLI, channels, identity, billing.
+Standard ships no model providers. A provider is a pi-ai `Provider` you pass
+in, or a module you point the CLI at. The point is a small base that extends
+cleanly: the kernel, subagents, and the continual harness are the whole thing,
+and everything else, providers included, is yours.
+
+What Standard does not ship: providers, a TUI, a chat CLI, channels, identity,
+billing.
 
 ## Layout
 
@@ -53,8 +59,6 @@ What Standard does not ship: a TUI, a chat CLI, channels, identity, billing.
 - `src/models.ts`: image input: `modelAcceptsImages()`, MIME sniffing, the
   per-image and per-cell caps, and reading an image file as pi-ai
   `ImageContent`.
-- `src/providers/casedev.ts`: case.dev as a pi-ai provider, with the catalog's
-  real context windows and output caps.
 - `src/harness.ts`: `openStandard()`, which opens Pi Durable on JSONL storage
   with the kernel extension installed.
 - `bin/standard.ts`: `standard run "<prompt>" [--image <path>]...`, print mode.
@@ -69,12 +73,43 @@ uv venv -p 3.13 .venv
 uv pip install -p .venv/bin/python \
   "prime-agent-runtime @ git+https://github.com/PrimeIntellect-ai/prime-agent@afe8d14c4#subdirectory=prime-agent-runtime" \
   dill
-export CASEDEV_API_KEY=sk_case_...
+export STANDARD_PROVIDER=./my-provider.ts          # see Providers below
+export STANDARD_MODEL=myprovider/some-model
 node --experimental-strip-types bin/standard.ts run "Use Python to compute the 30th Fibonacci number and keep it in fib30."
 node --experimental-strip-types bin/standard.ts run "What is fib30 squared?"
 node --experimental-strip-types bin/standard.ts refine   # one refinement pass, prints the edits
 node --experimental-strip-types bin/standard.ts state    # what the model sees
 ```
+
+## Providers
+
+A provider module is an ES module whose default export is a pi-ai `Provider`,
+an array of them, or a function that receives the `Models` catalog. It must be
+able to resolve `@earendil-works/pi-ai` from where it lives. An
+OpenAI-compatible endpoint is about twenty lines:
+
+```ts
+import { createProvider, envApiKeyAuth, type Model } from "@earendil-works/pi-ai";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+
+const baseUrl = "https://llm.example.com/v1";
+const model: Model<"openai-completions"> = {
+  id: "fast", name: "fast", api: "openai-completions", provider: "example", baseUrl,
+  reasoning: false, input: ["text", "image"],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 200_000, maxTokens: 32_000,
+};
+export default createProvider({
+  id: "example", name: "Example", baseUrl,
+  auth: { apiKey: envApiKeyAuth("Example key", ["EXAMPLE_API_KEY"]) },
+  models: [model], api: openAICompletionsApi(),
+});
+```
+
+pi-ai's built-in provider factories (`@earendil-works/pi-ai/providers/*`) work
+the same way. From code, build the catalog yourself and pass it to
+`openStandard({ models })`; `contextWindow` and `maxTokens` on each model are
+what the harness uses for compaction, so set them from the real limits.
 
 The second command runs in a new process. The answer comes from the restored
 variable, not a recomputation.
@@ -88,8 +123,10 @@ State lives in `.standard/`: `transcript/` is the Pi Durable JSONL store,
 ```bash
 scripts/build-image.sh            # builds standard-co/harness:<sha12> and :dev, then smoke-tests
 docker volume create standard-state
-docker run --rm -e CASEDEV_API_KEY -v standard-state:/work/.standard standard-co/harness:dev \
-  run "Use Python to compute the 30th Fibonacci number and keep it in fib30."
+docker run --rm -e EXAMPLE_API_KEY -v "$PWD/my-provider.ts:/work/my-provider.ts:ro" \
+  -v standard-state:/work/.standard standard-co/harness:dev \
+  run --provider /work/my-provider.ts --model example/fast \
+  "Use Python to compute the 30th Fibonacci number and keep it in fib30."
 docker run --rm -v standard-state:/work/.standard standard-co/harness:dev state
 ```
 

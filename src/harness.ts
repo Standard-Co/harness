@@ -1,17 +1,17 @@
-// Open a Standard harness: Pi Durable on JSONL storage, with the Python
-// kernel extension and the configured model providers installed.
+// Open a Standard harness: Pi Durable on JSONL storage, with the kernel,
+// subagents, and continual harness installed. Standard ships no model
+// providers; the caller passes a pi-ai catalog with its providers set.
 
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Context } from "@earendil-works/chord";
-import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
+import type { MutableModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, Harness, type Extension, type Registry } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
 import { createContinualExtension, type ContinualExtension } from "./continual/extension.ts";
 import { routeHostRequests } from "./host-requests.ts";
 import { createKernelExtension } from "./kernel/extension.ts";
-import { casedevProvider } from "./providers/casedev.ts";
 import { createSubagentsExtension, type SubagentsExtension } from "./subagents/extension.ts";
 
 export interface StandardOptions {
@@ -21,7 +21,8 @@ export interface StandardOptions {
 	readonly cwd: string;
 	/** Python interpreter with prime-agent-runtime installed. */
 	readonly python: string;
-	readonly models?: MutableModels;
+	/** pi-ai catalog with providers already set and, for dynamic catalogs, refreshed. */
+	readonly models: MutableModels;
 	readonly extensions?: readonly Extension[];
 	/** Review for automatic refinement every N answered turns; 0 disables. Default 4. */
 	readonly reviewEvery?: number;
@@ -44,12 +45,7 @@ export async function openStandard(options: StandardOptions, context: Context): 
 	await mkdir(join(dir, "transcript"), { recursive: true });
 	await mkdir(join(dir, "kernel"), { recursive: true });
 
-	const models = options.models ?? createModels();
-	if (options.models === undefined) {
-		models.setProvider(casedevProvider());
-		const refreshed = await models.refresh({ providers: ["casedev"] });
-		for (const [provider, error] of refreshed.errors) console.error(`[standard] ${provider}: ${String(error)}`);
-	}
+	const { models } = options;
 
 	// Core: the kernel and subagents. Bundled extension: the continual harness. Nothing else ships by default.
 	const continual = createContinualExtension({ stateDir: join(dir, "kernel"), ...(options.reviewEvery === undefined ? {} : { reviewEvery: options.reviewEvery }) });
