@@ -41,11 +41,14 @@ What Standard does not ship: a TUI, a chat CLI, channels, identity, billing.
 - `src/continual/extension.ts`: the `continual` extension: prompt sections, the
   `standard.continual` document with the refinement history, turn-boundary
   scheduling, and the kernel's `refine.run` and `refine.status` host requests.
+- `src/models.ts`: image input: `modelAcceptsImages()`, MIME sniffing, the
+  per-image and per-cell caps, and reading an image file as pi-ai
+  `ImageContent`.
 - `src/providers/casedev.ts`: case.dev as a pi-ai provider, with the catalog's
   real context windows and output caps.
 - `src/harness.ts`: `openStandard()`, which opens Pi Durable on JSONL storage
   with the kernel extension installed.
-- `bin/standard.ts`: `standard run "<prompt>"`, print mode.
+- `bin/standard.ts`: `standard run "<prompt>" [--image <path>]...`, print mode.
 
 ## Run
 
@@ -78,5 +81,11 @@ MIT. Placeholder until the license is decided.
 ## Status
 
 Experimental. Pi Durable's API changes between releases and is pinned here.
-Image input and subagents are not wired yet. A forked conversation starts with
+Image input works in two directions. A cell calls `show_image(path_or_bytes)`
+(a kernel builtin over Prime's `emit` display bridge), and the `ipython` tool
+returns the image as an `ImageContent` part of its result: PNG, JPEG, GIF, or
+WebP, MIME taken from the bytes, at most 5 MB base64 each and 4 per cell. A
+text-only model gets a diagnostic instead. `standard run --image <path>`
+attaches images to the prompt and refuses text-only models. Images are stored
+inline in the transcript. Subagents are not wired yet. A forked conversation starts with
 an empty local harness; the global one is shared.
