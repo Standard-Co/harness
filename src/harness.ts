@@ -9,8 +9,10 @@ import { createRegistry, Harness, type Extension, type Registry } from "@earendi
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
 import { createContinualExtension, type ContinualExtension } from "./continual/extension.ts";
+import { routeHostRequests } from "./host-requests.ts";
 import { createKernelExtension } from "./kernel/extension.ts";
 import { casedevProvider } from "./providers/casedev.ts";
+import { createSubagentsExtension, type SubagentsExtension } from "./subagents/extension.ts";
 
 export interface StandardOptions {
 	/** Where transcripts, documents, and kernel snapshots live. */
@@ -23,6 +25,8 @@ export interface StandardOptions {
 	readonly extensions?: readonly Extension[];
 	/** Review for automatic refinement every N answered turns; 0 disables. Default 4. */
 	readonly reviewEvery?: number;
+	/** Deepest subagent level; an agent at this depth cannot spawn. Default 3. */
+	readonly maxSubagentDepth?: number;
 }
 
 export interface Standard {
@@ -31,6 +35,7 @@ export interface Standard {
 	readonly models: MutableModels;
 	readonly dir: string;
 	readonly continual: ContinualExtension;
+	readonly subagents: SubagentsExtension;
 	close(context: Context): Promise<void>;
 }
 
@@ -46,15 +51,25 @@ export async function openStandard(options: StandardOptions, context: Context): 
 		for (const [provider, error] of refreshed.errors) console.error(`[standard] ${provider}: ${String(error)}`);
 	}
 
-	// Core: the kernel. Bundled extension: the continual harness. Nothing else ships by default.
+	// Core: the kernel and subagents. Bundled extension: the continual harness. Nothing else ships by default.
 	const continual = createContinualExtension({ stateDir: join(dir, "kernel"), ...(options.reviewEvery === undefined ? {} : { reviewEvery: options.reviewEvery }) });
+	const subagents = createSubagentsExtension({
+		stateDir: join(dir, "kernel"),
+		models,
+		...(options.maxSubagentDepth === undefined ? {} : { maxDepth: options.maxSubagentDepth }),
+	});
 	const kernel = createKernelExtension({
 		python: options.python,
 		stateDir: join(dir, "kernel"),
-		hostRequest: (conversationId, data, context) => continual.hostRequest(conversationId, data, context),
+		env: subagents.kernelEnv,
+		hostRequest: routeHostRequests({
+			refine: (origin, data, context) => continual.hostRequest(origin.conversationId, data, context),
+			rlm: subagents.hostRequest,
+		}),
 	});
 	const registry = createRegistry();
 	registry.install(kernel.extension);
+	registry.install(subagents.extension);
 	registry.install(continual.extension);
 	for (const extension of options.extensions ?? []) registry.install(extension);
 
@@ -70,10 +85,12 @@ export async function openStandard(options: StandardOptions, context: Context): 
 		context,
 	);
 	continual.attach(harness);
+	subagents.attach(harness);
 
 	return {
 		harness,
 		continual,
+		subagents,
 		registry,
 		models,
 		dir,

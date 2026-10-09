@@ -20,9 +20,10 @@ import {
 	section,
 	type ConversationId,
 	type Extension,
+	type TaskId,
 	type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
-import { KernelProcess } from "./process.ts";
+import { KernelProcess, type CellOutput } from "./process.ts";
 
 export type KernelState = {
 	/** Absolute path of the last good dill snapshot, or null before the first one. */
@@ -45,12 +46,26 @@ export const KernelDoc = defineDoc<KernelState>({
 	initial: () => ({ snapshotPath: null, manifestPath: null, savedNames: [], skippedNames: [], cells: 0, lastError: null }),
 });
 
+/** Where a `host_request` came from. */
+export type HostRequestOrigin = {
+	readonly conversationId: ConversationId;
+	/**
+	 * `<ipython task id>:<n>` for the n-th request of the cell that sent it; absent outside a cell. Stable for a given
+	 * call, so a handler can key durable effects on it.
+	 */
+	readonly callKey?: string;
+};
+
+export type HostRequestHandler = (origin: HostRequestOrigin, data: Record<string, unknown>, context: Context) => Promise<unknown>;
+
 export interface KernelExtensionOptions {
 	readonly python: string;
 	/** Directory for per-conversation snapshots. */
 	readonly stateDir: string;
-	/** Answers the kernel's `host_request` events for one conversation. Unhandled types fail the call inside Python. */
-	readonly hostRequest?: (conversationId: ConversationId, data: Record<string, unknown>, context: Context) => Promise<unknown>;
+	/** Answers the kernel's `host_request` events. Unhandled types fail the call inside Python. */
+	readonly hostRequest?: HostRequestHandler;
+	/** Extra environment for a conversation's kernel, read when it starts. */
+	readonly env?: (conversationId: ConversationId, context: Context) => Promise<Record<string, string>>;
 	readonly snapshotCaps?: { maxBytes?: number; maxVariableBytes?: number };
 }
 
@@ -95,6 +110,14 @@ export interface KernelExtension {
 
 export function createKernelExtension(options: KernelExtensionOptions): KernelExtension {
 	const kernels = new Map<ConversationId, Promise<KernelProcess>>();
+	// The cell running in each conversation's kernel; tools of one conversation run sequentially.
+	const activeCells = new Map<ConversationId, { taskId: TaskId; requests: number }>();
+
+	function answer(conversationId: ConversationId, data: Record<string, unknown>): Promise<unknown> {
+		const cell = activeCells.get(conversationId);
+		const origin: HostRequestOrigin = cell === undefined ? { conversationId } : { conversationId, callKey: `${cell.taskId}:${cell.requests++}` };
+		return options.hostRequest!(origin, data, BACKGROUND);
+	}
 
 	async function kernelFor(api: ToolExecutionApi, context: Context): Promise<KernelProcess> {
 		const existing = kernels.get(api.conversationId);
@@ -117,8 +140,9 @@ export function createKernelExtension(options: KernelExtensionOptions): KernelEx
 					PRIME_AGENT_CODING_AGENT_DIR: join(options.stateDir, "agent"),
 					RLM_DEPTH: "0",
 					RLM_MAX_DEPTH: "0",
+					...(options.env === undefined ? {} : await options.env(api.conversationId, context)),
 				},
-				hostRequest: options.hostRequest === undefined ? undefined : (data) => options.hostRequest!(api.conversationId, data, BACKGROUND),
+				hostRequest: options.hostRequest === undefined ? undefined : (data) => answer(api.conversationId, data),
 			});
 			const boot = await kernel.execute(BOOTSTRAP_CELL);
 			if (boot.status !== "ok") {
@@ -155,7 +179,13 @@ export function createKernelExtension(options: KernelExtensionOptions): KernelEx
 		outputLimits: { maxBytes: 64 * 1024, maxLines: 2_000, retain: "head" },
 		execute: async (args, api, context) => {
 			const kernel = await kernelFor(api, context);
-			const output = await kernel.execute(args.code);
+			activeCells.set(api.conversationId, { taskId: api.taskId, requests: 0 });
+			let output: CellOutput;
+			try {
+				output = await kernel.execute(args.code);
+			} finally {
+				activeCells.delete(api.conversationId);
+			}
 			if (output.text.length > 0) api.output(output.text);
 
 			// Snapshot the namespace and record it, so a restarted process can revive it.

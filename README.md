@@ -41,6 +41,15 @@ What Standard does not ship: a TUI, a chat CLI, channels, identity, billing.
 - `src/continual/extension.ts`: the `continual` extension: prompt sections, the
   `standard.continual` document with the refinement history, turn-boundary
   scheduling, and the kernel's `refine.run` and `refine.status` host requests.
+- `src/subagents/`: the `subagents` extension. `rlm.spawn` from the REPL creates
+  a child conversation, a copy of the parent's agent with its own kernel, owned
+  by a background anchor task of the parent that delivers the task and records
+  the answer in the parent's `standard.subagents` document. `rlm.collect`,
+  `list_subagents`, `delete_subagent`, `rename`, `progress_note`, and
+  `find_models` read and edit that document. Depth is capped by
+  `maxSubagentDepth` (default 3).
+- `src/host-requests.ts`: routes the kernel's host requests by type family
+  (`refine.*`, `rlm.*`).
 - `src/providers/casedev.ts`: case.dev as a pi-ai provider, with the catalog's
   real context windows and output caps.
 - `src/harness.ts`: `openStandard()`, which opens Pi Durable on JSONL storage
@@ -78,5 +87,6 @@ MIT. Placeholder until the license is decided.
 ## Status
 
 Experimental. Pi Durable's API changes between releases and is pinned here.
-Image input and subagents are not wired yet. A forked conversation starts with
+Image input is not wired yet. Subagents report back only through
+`rlm.collect`; there is no agent-to-agent messaging. A forked conversation starts with
 an empty local harness; the global one is shared.
