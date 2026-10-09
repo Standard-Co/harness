@@ -8,6 +8,7 @@ import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, Harness, type Extension, type Registry } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
+import { createContinualExtension, type ContinualExtension } from "./continual/extension.ts";
 import { createKernelExtension } from "./kernel/extension.ts";
 import { casedevProvider } from "./providers/casedev.ts";
 
@@ -20,6 +21,8 @@ export interface StandardOptions {
 	readonly python: string;
 	readonly models?: MutableModels;
 	readonly extensions?: readonly Extension[];
+	/** Review for automatic refinement every N answered turns; 0 disables. Default 4. */
+	readonly reviewEvery?: number;
 }
 
 export interface Standard {
@@ -27,6 +30,7 @@ export interface Standard {
 	readonly registry: Registry;
 	readonly models: MutableModels;
 	readonly dir: string;
+	readonly continual: ContinualExtension;
 	close(context: Context): Promise<void>;
 }
 
@@ -42,9 +46,16 @@ export async function openStandard(options: StandardOptions, context: Context): 
 		for (const [provider, error] of refreshed.errors) console.error(`[standard] ${provider}: ${String(error)}`);
 	}
 
-	const kernel = createKernelExtension({ python: options.python, stateDir: join(dir, "kernel") });
+	// Core: the kernel. Bundled extension: the continual harness. Nothing else ships by default.
+	const continual = createContinualExtension({ stateDir: join(dir, "kernel"), ...(options.reviewEvery === undefined ? {} : { reviewEvery: options.reviewEvery }) });
+	const kernel = createKernelExtension({
+		python: options.python,
+		stateDir: join(dir, "kernel"),
+		hostRequest: (conversationId, data, context) => continual.hostRequest(conversationId, data, context),
+	});
 	const registry = createRegistry();
 	registry.install(kernel.extension);
+	registry.install(continual.extension);
 	for (const extension of options.extensions ?? []) registry.install(extension);
 
 	const storage = await openNodeJsonlStorage(join(dir, "transcript"), context);
@@ -58,9 +69,11 @@ export async function openStandard(options: StandardOptions, context: Context): 
 		},
 		context,
 	);
+	continual.attach(harness);
 
 	return {
 		harness,
+		continual,
 		registry,
 		models,
 		dir,

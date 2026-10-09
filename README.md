@@ -17,6 +17,16 @@ Both upstreams are dependencies, not forks. Pi Durable is pinned by exact
 version. The Python runtime is Prime's `prime-agent-runtime` package, unchanged,
 speaking its protocol 3 over newline-delimited JSON.
 
+Standard ships one extension: the continual harness, Prime Agent's self-edited
+memory layer. Prompt notes, memories, skills, and subagent specs live in Prime's
+`harness_state.json` files, which the kernel's `rlm.harness` calls and this host
+both read and write. The extension renders them into the system prompt before
+each request and runs refinement as a two-phase durable task: `plan` makes one
+model call and checkpoints the proposal, `apply` re-reads the file, rejects
+edits whose entries changed meanwhile, writes the file, and records the result.
+Automatic refinement goes through a review gate every few turns; the model can
+also ask for one from the REPL.
+
 What Standard does not ship: a TUI, a chat CLI, channels, identity, billing.
 
 ## Layout
@@ -25,6 +35,12 @@ What Standard does not ship: a TUI, a chat CLI, channels, identity, billing.
 - `src/kernel/extension.ts`: the `kernel` extension. One `ipython` tool, a
   per-conversation kernel, the `standard.kernel` document that records the last
   good snapshot, and the prompt sections that explain the REPL to the model.
+- `src/continual/state.ts`: Prime's state file format, prompt rendering, and
+  proposal parsing, validation, apply with baseline check, and rollback.
+- `src/continual/refine.ts`: the `standard.refine` task: review, plan, apply.
+- `src/continual/extension.ts`: the `continual` extension: prompt sections, the
+  `standard.continual` document with the refinement history, turn-boundary
+  scheduling, and the kernel's `refine.run` and `refine.status` host requests.
 - `src/providers/casedev.ts`: case.dev as a pi-ai provider, with the catalog's
   real context windows and output caps.
 - `src/harness.ts`: `openStandard()`, which opens Pi Durable on JSONL storage
@@ -44,13 +60,16 @@ uv pip install -p .venv/bin/python \
 export CASEDEV_API_KEY=sk_case_...
 node --experimental-strip-types bin/standard.ts run "Use Python to compute the 30th Fibonacci number and keep it in fib30."
 node --experimental-strip-types bin/standard.ts run "What is fib30 squared?"
+node --experimental-strip-types bin/standard.ts refine   # one refinement pass, prints the edits
+node --experimental-strip-types bin/standard.ts state    # what the model sees
 ```
 
 The second command runs in a new process. The answer comes from the restored
 variable, not a recomputation.
 
 State lives in `.standard/`: `transcript/` is the Pi Durable JSONL store,
-`kernel/<conversation>/` holds the dill snapshot and its manifest.
+`kernel/<conversation>/` holds the dill snapshot, its manifest, and the local
+`harness/harness_state.json`; `kernel/agent/harness/` holds the global one.
 
 ## License
 
@@ -59,4 +78,5 @@ MIT. Placeholder until the license is decided.
 ## Status
 
 Experimental. Pi Durable's API changes between releases and is pinned here.
-Image input, subagents, and the continual harness are not wired yet.
+Image input and subagents are not wired yet. A forked conversation starts with
+an empty local harness; the global one is shared.

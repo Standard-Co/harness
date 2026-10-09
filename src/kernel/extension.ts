@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
+import { BACKGROUND_CONTEXT as BACKGROUND } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import {
 	defineDoc,
@@ -21,7 +22,7 @@ import {
 	type Extension,
 	type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
-import { KernelProcess, type HostRequestHandler } from "./process.ts";
+import { KernelProcess } from "./process.ts";
 
 export type KernelState = {
 	/** Absolute path of the last good dill snapshot, or null before the first one. */
@@ -48,7 +49,8 @@ export interface KernelExtensionOptions {
 	readonly python: string;
 	/** Directory for per-conversation snapshots. */
 	readonly stateDir: string;
-	readonly hostRequest?: HostRequestHandler;
+	/** Answers the kernel's `host_request` events for one conversation. Unhandled types fail the call inside Python. */
+	readonly hostRequest?: (conversationId: ConversationId, data: Record<string, unknown>, context: Context) => Promise<unknown>;
 	readonly snapshotCaps?: { maxBytes?: number; maxVariableBytes?: number };
 }
 
@@ -116,7 +118,7 @@ export function createKernelExtension(options: KernelExtensionOptions): KernelEx
 					RLM_DEPTH: "0",
 					RLM_MAX_DEPTH: "0",
 				},
-				hostRequest: options.hostRequest,
+				hostRequest: options.hostRequest === undefined ? undefined : (data) => options.hostRequest!(api.conversationId, data, BACKGROUND),
 			});
 			const boot = await kernel.execute(BOOTSTRAP_CELL);
 			if (boot.status !== "ok") {
