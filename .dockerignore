@@ -1,0 +1,11 @@
+# Allowlist: only what the Dockerfile copies.
+*
+!Dockerfile
+!package.json
+!package-lock.json
+!LICENSE
+!README.md
+!bin/
+!src/
+!docker/requirements.txt
+!docker/build-requirements.txt

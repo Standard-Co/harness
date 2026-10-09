@@ -71,6 +71,30 @@ State lives in `.standard/`: `transcript/` is the Pi Durable JSONL store,
 `kernel/<conversation>/` holds the dill snapshot, its manifest, and the local
 `harness/harness_state.json`; `kernel/agent/harness/` holds the global one.
 
+## Container
+
+```bash
+scripts/build-image.sh            # builds standard-co/harness:<sha12> and :dev, then smoke-tests
+docker volume create standard-state
+docker run --rm -e CASEDEV_API_KEY -v standard-state:/work/.standard standard-co/harness:dev \
+  run "Use Python to compute the 30th Fibonacci number and keep it in fib30."
+docker run --rm -v standard-state:/work/.standard standard-co/harness:dev state
+```
+
+The image is `node:22-bookworm-slim` pinned by digest, Debian's Python 3.11,
+and the harness at `/opt/standard` with production `node_modules` from
+`package-lock.json`. The kernel venv at `/opt/standard/venv` holds
+`prime-agent-runtime` built from the commit in the Dockerfile's
+`PRIME_AGENT_COMMIT` plus `dill`, with every other Python package pinned by
+hash in `docker/requirements.txt` (regenerate with the command in
+`docker/requirements.in`). The build fails if Python, Node, the REPL's
+protocol 3 handshake, or the CLI drift. `/opt/standard/manifest/` lists the
+installed Debian, Python, and Node versions.
+
+The container runs as the non-root `standard` user (uid 10001) in `/work`,
+so the default `--dir .standard` is `/work/.standard`. Mount a volume there
+to keep transcripts and kernel snapshots between runs.
+
 ## License
 
 MIT. Placeholder until the license is decided.

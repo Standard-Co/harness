@@ -1,0 +1,9 @@
+# Python packages for the image's kernel venv. prime-agent-runtime is resolved
+# here for its dependencies only; the Dockerfile installs it from the pinned
+# commit in PRIME_AGENT_COMMIT. Regenerate requirements.txt after any change:
+#
+#   uv pip compile docker/requirements.in -o docker/requirements.txt \
+#     --python-version 3.11 --python-platform linux --generate-hashes \
+#     --no-emit-package prime-agent-runtime --no-header
+prime-agent-runtime @ git+https://github.com/PrimeIntellect-ai/prime-agent@afe8d14c4526cf492c4ab17f8eb3e150d329fe8b#subdirectory=prime-agent-runtime
+dill==0.4.1

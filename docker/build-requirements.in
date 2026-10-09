@@ -1,0 +1,6 @@
+# Build backend for prime-agent-runtime (hatchling), used only in the builder
+# stage. Regenerate build-requirements.txt after any change:
+#
+#   uv pip compile docker/build-requirements.in -o docker/build-requirements.txt \
+#     --python-version 3.11 --python-platform linux --generate-hashes --no-header
+hatchling
